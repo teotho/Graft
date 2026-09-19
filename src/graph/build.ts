@@ -41,6 +41,10 @@ import { writeAskIndex } from "../ask/index-file.js";
 import { discoverScopes, scopeOf } from "./scopes.js";
 import type { GraphV1, Kind, NodeV1, Relation, ScopeV1 } from "./types.js";
 import type { CruxSummarizer } from "../ai/crux.js";
+import { extractorStamp } from "./extract-cache.js";
+import { buildProvenance, digestGraphBuild } from "./provenance.js";
+import { digestSources } from "../context/node-file.js";
+import { assertRepoRelativePath } from "../util/paths.js";
 
 export { listSourceFiles } from "./source-files.js";
 
@@ -161,7 +165,8 @@ export async function buildGraph(
     followSubmodules: readFollowSubmodules(root),
     followNestedRepos: readFollowNestedRepos(root),
   });
-  const onlyDirs = opts.onlyDirs && opts.onlyDirs.length > 0 ? new Set(opts.onlyDirs) : undefined;
+  const validatedOnlyDirs = opts.onlyDirs?.map((path) => assertRepoRelativePath(path, "only-dir"));
+  const onlyDirs = validatedOnlyDirs && validatedOnlyDirs.length > 0 ? new Set(validatedOnlyDirs) : undefined;
   const repoFiles = filterByOnlyDirs(walked, root, onlyDirs);
   const files = listSourceStats(root, outDir, repoFiles);
   const discoveredScopes = discoverScopes(root, repoFiles);
@@ -305,11 +310,14 @@ export async function buildGraph(
       edgeCount: edges.length,
       languages: [...langs].sort(),
       scopes,
+      provenance: buildProvenance(
+        digestSources(Object.entries(entries).map(([path, entry]) => ({ path, hash: entry.hash }))),
+        extractorStamp() ?? "nostamp",
+      ),
     },
     nodes,
     edges,
   };
-
   // graph.json is its own Tier-2 cache: fold in the prior meaning layer so an
   // unchanged body is never re-summarized (and a Tier-1-only run never wipes it).
   // Read BEFORE the first checkpoint can overwrite wiring.json.
@@ -322,7 +330,10 @@ export async function buildGraph(
       opts.onProgress?.({ phase: "enrich", index, total, file: node }),
     // Periodic durability flush of partial crux; the next run folds it back in by
     // body_hash, so an interrupted --deep run never repays the crux it computed.
-    checkpoint: () => writeGraph(graph, outDir),
+    checkpoint: () => {
+      graph.meta.buildDigest = digestGraphBuild(graph);
+      writeGraph(graph, outDir);
+    },
   });
   errors.push(...meaning.errors);
 
@@ -336,6 +347,7 @@ export async function buildGraph(
     opts.onProgress?.({ phase: "enrich", index: r.added, total: r.queried, file: `lsp:${r.server ?? "none"}` });
   }
 
+  graph.meta.buildDigest = digestGraphBuild(graph);
   const graphPath = writeGraph(graph, outDir);
   // `ask`'s token/IDF sidecar — moves per-query corpus tokenization to build
   // time (~45% of query time on a 32k-node graph, profiled). Lives in the
@@ -358,7 +370,7 @@ export async function buildGraph(
   // these source bytes." Nothing about the projections below — which is why it is
   // safe to write here, and why `graphOnly` builds (the query path, which stops
   // right after this line) are still recorded as fresh.
-  writeFingerprint(outDir, entries, opts.onlyDirs);
+  writeFingerprint(outDir, entries, validatedOnlyDirs);
 
   // Tier-2 passive surface: project the nodes into per-file markdown cards, and
   // refresh the INDEX roster. Pure projection — no LLM, no network.

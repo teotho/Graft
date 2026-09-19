@@ -15,7 +15,7 @@ import { WALK_RELATIONS } from "../graph/relations.js";
 import { assertPrefixIndexed, pathUnderPrefix } from "../graph/scopes.js";
 import { normalizePathPrefix } from "../util/paths.js";
 import { savingsFor, type Savings } from "../context/savings.js";
-import { readSourceFile } from "../util/source.js";
+import { readRepoSourceFile } from "../util/source.js";
 
 export interface GrepHit {
   line: number;
@@ -160,7 +160,7 @@ export function grepGraph(graph: GraphV1, repoRoot: string, pattern: string, opt
   for (const file of fileNodes) {
     let text: string;
     try {
-      const decoded = readSourceFile(join(repoRoot, file.path));
+      const decoded = readRepoSourceFile(repoRoot, file.path);
       if (decoded === null) {
         truncatedFiles++; // unsupported encoding (e.g. UTF-16BE) — same posture as unreadable
         continue;

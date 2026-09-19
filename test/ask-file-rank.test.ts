@@ -4,6 +4,7 @@ import {
   rankFilesBounded,
   type FileRankCandidate,
 } from "../src/ask/file-rank.js";
+import { DEFAULT_RANKING_POLICY } from "../src/ask/policy.js";
 
 const weights = (...entries: Array<[string, number]>): Map<string, number> => new Map(entries);
 const matched = (...terms: string[]): Set<string> => new Set(terms);
@@ -20,7 +21,7 @@ function candidate(
     lexical,
     graph,
     rankFactor,
-    baselineScore: value.baselineScore ?? rankFactor * (lexical + 0.5 * graph),
+    baselineScore: value.baselineScore ?? rankFactor * (lexical + DEFAULT_RANKING_POLICY.graphWeight * graph),
     matchedTerms: value.matchedTerms ?? new Set(),
     eligible: value.eligible ?? lexical > 0,
     ...value,

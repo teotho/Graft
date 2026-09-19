@@ -76,14 +76,16 @@ export interface FusionResult {
 
 /** RRF smoothing constant — the standard value from the original RRF paper;
  * high enough that rank 1 vs 2 differ gently rather than by 2×. */
-export const RRF_K = 60;
+import { DEFAULT_RANKING_POLICY } from "./policy.js";
+
+export const RRF_K = DEFAULT_RANKING_POLICY.workspaceRrfK;
 
 /** A scope federates only when its best doc scores at least this share of the
  * global best — below it the match is reported, not fused. Used by
  * `fuseScopes`'s own internal gate (a post-normalization safety net once a
  * caller has already applied the real match-strength gate — see
  * {@link STRONG_FLOOR}/{@link HIGH_FLOOR}). */
-export const PARTICIPATION_RATIO = 0.25;
+export const PARTICIPATION_RATIO = DEFAULT_RANKING_POLICY.scopeParticipationRatio;
 
 /** The single source of truth for the cross-scope participation gate shared
  * by `rankScopesAndFuse` (single-graph multi-scope) and `federateAsk`
@@ -97,7 +99,7 @@ export const PARTICIPATION_RATIO = 0.25;
  * genuine fixture (≥0.45) yet strictly above a body-only collision's 0, so a
  * real partial-relevance hit on a common/low-idf term is never overcorrected
  * out. */
-export const STRONG_FLOOR = 0.1;
+export const STRONG_FLOOR = DEFAULT_RANKING_POLICY.workspaceStrongFloor;
 /** …OR the overall (name+path+body) coverage is broad enough to be real even
  * body-only. A single incidental body-token collision measures ~0.29 and RISES
  * with corpus size (0.30+ at 200 nodes) but never approaches this, while a
@@ -105,7 +107,7 @@ export const STRONG_FLOOR = 0.1;
  * scale-invariant floors, NOT a raw-lexical-score ratio (which — calibrated for
  * raw-lexical-SCORE space — was far too lenient in coverage/matched-fraction
  * space and leaked junk, worsening as the corpus grew). */
-export const HIGH_FLOOR = 0.5;
+export const HIGH_FLOOR = DEFAULT_RANKING_POLICY.workspaceHighFloor;
 
 /** Score-desc, id-asc ordering — the id tiebreak is what makes fusion
  * deterministic under input shuffle. */

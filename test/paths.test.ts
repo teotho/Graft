@@ -19,7 +19,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join, sep } from "node:path";
-import { normalizePathPrefix, relPosix, stripTrailingSlashes, toPosixPath } from "../src/util/paths.js";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import {
+  assertImmediateChildName,
+  assertRepoRelativePath,
+  normalizePathPrefix,
+  relPosix,
+  resolveContainedPath,
+  stripTrailingSlashes,
+  toPosixPath,
+} from "../src/util/paths.js";
 import { pathUnderPrefix } from "../src/graph/scopes.js";
 
 test("toPosixPath: identity on an already-posix path, and idempotent", () => {
@@ -51,6 +61,7 @@ test("normalizePathPrefix: trailing separators and leading ./ reduce to one form
   assert.equal(normalizePathPrefix("src///"), "src");
   assert.equal(normalizePathPrefix("./src"), "src");
   assert.equal(normalizePathPrefix("././src/"), "src");
+  assert.equal(normalizePathPrefix("."), "");
   // `ask`'s own footer suggests `--in <scope>/` with the slash, so accepting the
   // trailing form is what keeps the tool's suggested next command runnable.
   assert.equal(normalizePathPrefix("server/src/gpu/"), "server/src/gpu");
@@ -89,4 +100,37 @@ test("pathUnderPrefix: segment-aware, so a prefix is not a substring", () => {
   assert.ok(!pathUnderPrefix("lib/mysrc/x.ts", "src"));
   assert.ok(!pathUnderPrefix("srcfoo/x.ts", "src"));
   assert.ok(!pathUnderPrefix("src/gate.ts", "gate.ts"));
+});
+
+test("repo-relative validation rejects absolute, traversal, and nested workspace children", () => {
+  assert.equal(assertRepoRelativePath("src/graph/build.ts"), "src/graph/build.ts");
+  assert.throws(() => normalizePathPrefix("../outside"), /traversal/i);
+  assert.throws(() => normalizePathPrefix("src/../../outside"), /traversal/i);
+  assert.throws(() => assertRepoRelativePath("/absolute"), /repo-relative/i);
+  assert.throws(() => assertRepoRelativePath("C:/absolute"), /repo-relative/i);
+  assert.equal(assertImmediateChildName("repo-a"), "repo-a");
+  assert.throws(() => assertImmediateChildName("group/repo-a"), /immediate child/i);
+});
+
+test("resolveContainedPath accepts real files and rejects canonical symlink escapes", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "graft-contained-root-"));
+  const outside = mkdtempSync(join(tmpdir(), "graft-contained-outside-"));
+  try {
+    mkdirSync(join(root, "src"), { recursive: true });
+    writeFileSync(join(root, "src", "inside.ts"), "export const inside = 1;\n");
+    writeFileSync(join(outside, "outside.ts"), "export const outside = 1;\n");
+    assert.equal(resolveContainedPath(root, "src/inside.ts"), join(root, "src", "inside.ts"));
+
+    const link = join(root, "escape");
+    try {
+      symlinkSync(outside, link, process.platform === "win32" ? "junction" : "dir");
+    } catch (err) {
+      t.skip(`cannot create directory link (${err instanceof Error ? err.message : err})`);
+      return;
+    }
+    assert.throws(() => resolveContainedPath(root, "escape/outside.ts"), /escapes the repository/i);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
 });

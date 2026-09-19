@@ -15,7 +15,7 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { contentHash } from "../util/id.js";
-import { relPosix } from "../util/paths.js";
+import { relPosix, resolveContainedPath } from "../util/paths.js";
 import { readSourceFile } from "../util/source.js";
 import { CODE_EXTENSIONS, listContextFiles } from "./build.js";
 import { contextDirFor, readManifest, readNodes } from "./node-file.js";
@@ -134,7 +134,11 @@ export function indexFreshness(dir: string, opts: CheckOptions = {}): FreshnessR
   if (!manifest) return null;
   let missing = 0;
   for (const ref of manifest.files) {
-    if (!existsSync(resolve(root, ref.path))) missing++;
+    try {
+      if (!existsSync(resolveContainedPath(root, ref.path, "manifest source path"))) missing++;
+    } catch {
+      missing++;
+    }
   }
   return { missing, total: manifest.files.length };
 }

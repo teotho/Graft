@@ -20,6 +20,9 @@ import { contentHash } from "../util/id.js";
 import { relPosix } from "../util/paths.js";
 import { readSourceFile } from "../util/source.js";
 import { readFollowNestedRepos, readFollowSubmodules, readIncludeDirs } from "../util/state.js";
+import { assertRepoRelativePath } from "../util/paths.js";
+import { buildProvenance } from "../graph/provenance.js";
+import { extractorStamp } from "../graph/extract-cache.js";
 import type { Summarizer } from "../ai/summarize.js";
 import { LlmFailureGate } from "../ai/failure.js";
 import type { FileSummary, SynthNode, Synthesizer } from "../ai/synthesize.js";
@@ -97,7 +100,8 @@ export interface BuildResult {
  * `--deep` without the flag still skips files the wiring pass excluded. */
 function resolveOnlyDirs(outDir: string, explicit?: readonly string[]): Set<string> | undefined {
   const list = explicit && explicit.length > 0 ? explicit : (readFingerprint(outDir)?.onlyDirs ?? []);
-  return list.length > 0 ? new Set(list) : undefined;
+  const validated = list.map((path) => assertRepoRelativePath(path, "only-dir"));
+  return validated.length > 0 ? new Set(validated) : undefined;
 }
 
 /**
@@ -359,6 +363,7 @@ export async function buildContext(dir: string, opts: BuildOptions): Promise<Bui
     version: MANIFEST_VERSION,
     model: opts.model,
     repoDigest: digestSources(fileRefs),
+    provenance: buildProvenance(digestSources(fileRefs), extractorStamp() ?? "nostamp"),
     files: fileRefs,
     nodes: nodes.map((n) => ({
       slug: n.slug,

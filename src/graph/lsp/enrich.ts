@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { relPosix } from "../../util/paths.js";
+import { resolveContainedPath } from "../../util/paths.js";
 import { languageLabelOf } from "../extract.js";
 import { genericLangOf } from "../generic.js";
 import type { GraphV1, NodeV1, EdgeV1 } from "../types.js";
@@ -78,7 +79,7 @@ export async function enrichWithLsp(
   const fileLines = new Map<string, string[]>();
   const linesOf = (rel: string): string[] => {
     if (!fileLines.has(rel)) {
-      try { fileLines.set(rel, readFileSync(join(root, rel), "utf8").split("\n")); }
+      try { fileLines.set(rel, readFileSync(resolveContainedPath(root, rel, "graph source path"), "utf8").split("\n")); }
       catch { fileLines.set(rel, []); }
     }
     return fileLines.get(rel)!;
@@ -101,7 +102,7 @@ export async function enrichWithLsp(
   const warm = sources.find((s) => namePos(s));
   if (warm) {
     const wp = namePos(warm)!;
-    if (!(await client.waitUntilReady(join(root, warm.path), wp))) {
+    if (!(await client.waitUntilReady(resolveContainedPath(root, warm.path, "graph source path"), wp))) {
       await client.dispose();
       return { added: 0, queried: 0, server: server.command }; // never became ready
     }

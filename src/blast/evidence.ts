@@ -9,6 +9,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { resolveContainedPath } from "../util/paths.js";
 import type { Evidence, EvidenceLine } from "../viz/assemble.js";
 import type { Impacted, Seed } from "./blast.js";
 import type { ChangedFile, DiffLine } from "./diff.js";
@@ -181,7 +182,7 @@ export function fileReader(root: string | undefined): (path: string) => string[]
     if (hit !== undefined) return hit;
     let lines: string[] | null = null;
     try {
-      lines = readFileSync(join(root, path), "utf8").split("\n");
+      lines = readFileSync(resolveContainedPath(root, path, "graph source path"), "utf8").split("\n");
     } catch {
       // Deleted, renamed under us, or unreadable: no snippet, no failure.
       lines = null;

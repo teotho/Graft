@@ -161,3 +161,28 @@ test("A3 PERMANENT gate: duplicate-named definitions still produce unique node i
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("readGraph rejects malformed counts, duplicate ids, and traversal source paths", () => {
+  const dir = mkdtempSync(join(tmpdir(), "graft-write-invalid-"));
+  try {
+    const path = wiringPath(dir);
+    const valid: GraphV1 = {
+      meta: { version: 1, nodeCount: 1, edgeCount: 0, languages: [] },
+      nodes: [makeNode()],
+      edges: [],
+    };
+    writeGraph(valid, dir);
+    assert.ok(readGraph(path));
+
+    writeFileSync(path, JSON.stringify({ ...valid, meta: { ...valid.meta, nodeCount: 2 } }));
+    assert.equal(readGraph(path), null);
+
+    writeFileSync(path, JSON.stringify({ ...valid, nodes: [makeNode(), makeNode()], meta: { ...valid.meta, nodeCount: 2 } }));
+    assert.equal(readGraph(path), null);
+
+    writeFileSync(path, JSON.stringify({ ...valid, nodes: [makeNode({ path: "../outside.ts" })] }));
+    assert.equal(readGraph(path), null);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

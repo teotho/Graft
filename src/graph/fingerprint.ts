@@ -25,6 +25,9 @@ import { readSourceFile } from "../util/source.js";
 import { readJson, writeJsonAtomic } from "../util/state.js";
 import { extractorStamp, pruneSidecars, type ExtractEntry } from "./extract-cache.js";
 import { listSourceStats } from "./source-files.js";
+import { buildProvenance, isBuildProvenance, type BuildProvenanceV1 } from "./provenance.js";
+import { digestSources } from "../context/node-file.js";
+import { assertRepoRelativePath } from "../util/paths.js";
 
 export const FINGERPRINT_PREFIX = "fingerprint";
 const FINGERPRINT_VERSION = 1;
@@ -54,6 +57,7 @@ export interface Fingerprint {
    * — so the query-path freshness probe (which never sees a CLI flag) enumerates the
    * identical whitelisted set and excluded files are never phantom "added" drift. */
   onlyDirs?: string[];
+  provenance?: BuildProvenanceV1;
 }
 
 /** What moved since the last build. Empty in all three arrays = nothing to do. */
@@ -78,6 +82,17 @@ export function readFingerprint(outDir: string): Fingerprint | null {
   const f = readJson<Fingerprint>(fingerprintPath(outDir));
   if (!f || f.version !== FINGERPRINT_VERSION || typeof f.files !== "object" || !f.files) return null;
   if (f.extractor !== stamp()) return null; // different extractor — re-extract, don't trust these prints
+  try {
+    for (const [path, print] of Object.entries(f.files)) {
+      assertRepoRelativePath(path, "fingerprint source path");
+      if (!Array.isArray(print) || print.length !== 3 ||
+          !Number.isFinite(print[0]) || !Number.isFinite(print[1]) || typeof print[2] !== "string") return null;
+    }
+    if (f.onlyDirs) for (const path of f.onlyDirs) assertRepoRelativePath(path, "fingerprint only-dir");
+  } catch {
+    return null;
+  }
+  if (f.provenance !== undefined && !isBuildProvenance(f.provenance)) return null;
   return f;
 }
 
@@ -94,6 +109,8 @@ export function writeFingerprint(
   try {
     const record: Fingerprint = { version: FINGERPRINT_VERSION, extractor: stamp(), files };
     if (onlyDirs && onlyDirs.length > 0) record.onlyDirs = onlyDirs;
+    const refs = Object.entries(entries).map(([path, entry]) => ({ path, hash: entry.hash }));
+    record.provenance = buildProvenance(digestSources(refs), stamp());
     writeJsonAtomic(fingerprintPath(outDir), record, true);
     pruneSidecars(join(outDir, CACHE_DIR), FINGERPRINT_PREFIX);
     return true;

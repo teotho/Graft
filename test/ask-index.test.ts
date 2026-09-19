@@ -20,6 +20,8 @@ import { readGraph, wiringPath } from "../src/graph/write.js";
 import { askIndexPath, readAskIndex, tokenize, counts, writeAskIndex } from "../src/ask/index-file.js";
 import { extractFile, languageOf } from "../src/graph/extract.js";
 import type { GraphV1, NodeV1 } from "../src/graph/types.js";
+import { digestGraphBuild, digestProvenance } from "../src/graph/provenance.js";
+import { buildProvenance } from "../src/graph/provenance.js";
 
 /** A small multi-file fixture with enough overlapping vocabulary that IDF and
  * BM25 actually differentiate hits, so a parity test on scores is meaningful. */
@@ -301,6 +303,45 @@ test("a failed sidecar write is recorded in build errors, not fatal", async () =
     const graph = readGraph(wiringPath(outDir));
     assert.ok(graph, "wiring graph should still be written despite the sidecar failure");
     assert.ok(result.cards > 0, "cards should still be written despite the sidecar failure");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("new ask sidecars are bound to the exact graph build and reject tampering/stale graphs", () => {
+  const dir = mkdtempSync(join(tmpdir(), "graft-ask-index-binding-"));
+  try {
+    const graph: GraphV1 = {
+      meta: {
+        version: 1,
+        nodeCount: 1,
+        edgeCount: 0,
+        languages: ["typescript"],
+        provenance: buildProvenance("a".repeat(64), "extractor-test"),
+      },
+      nodes: [{
+        id: "a.ts#f", name: "f", kind: "function", path: "a.ts", span: "L1-L1",
+        signature: "f(): void", exported: true, origin: "ast", body_hash: "hash",
+        body_text: "alpha beta", summary_state: "pending", summary: null, crux: null,
+      }],
+      edges: [],
+    };
+    graph.meta.buildDigest = digestGraphBuild(graph);
+    writeAskIndex(dir, graph);
+    const index = readAskIndex(dir, graph);
+    assert.ok(index?.binding);
+    assert.equal(index!.binding!.graphDigest, graph.meta.buildDigest);
+    assert.equal(index!.binding!.provenanceDigest, digestProvenance(graph.meta.provenance!));
+
+    const path = askIndexPath(dir);
+    const tampered = JSON.parse(readFileSync(path, "utf8"));
+    tampered.binding.graphDigest = "0".repeat(64);
+    writeFileSync(path, JSON.stringify(tampered));
+    assert.equal(readAskIndex(dir, graph), null, "tampered graph binding must be rejected");
+
+    writeAskIndex(dir, graph);
+    const stale: GraphV1 = { ...graph, meta: { ...graph.meta, buildDigest: "1".repeat(64) } };
+    assert.equal(readAskIndex(dir, stale), null, "sidecar from another graph build must be rejected");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

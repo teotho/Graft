@@ -8,9 +8,9 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { buildContext } from "../src/context/build.js";
 import { checkContext, indexFreshness, staleBanner } from "../src/context/check.js";
-import { contextDirFor, ensureGitignored, ensureSearchable } from "../src/context/node-file.js";
+import { contextDirFor, ensureGitignored, ensureSearchable, readManifest } from "../src/context/node-file.js";
+import { buildContext } from "../src/context/build.js";
 import { buildGraph } from "../src/graph/build.js";
 import { writeBuildConfig } from "../src/util/state.js";
 import { fakeProviders, PassthroughSummarizer } from "./helpers.js";
@@ -75,6 +75,38 @@ test("init builds one markdown node per entity, with links and a manifest", asyn
     const manifest = JSON.parse(readFileSync(join(ctx, "manifest.json"), "utf8"));
     assert.equal(manifest.files.length, 2);
     assert.equal(manifest.nodes.length, 3);
+    assert.equal(manifest.provenance.version, 1);
+    assert.equal(manifest.provenance.sourceDigest, manifest.repoDigest);
+    assert.equal(manifest.provenance.rankingPolicy, "graft-ranking-v1");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("readManifest rejects traversal paths and malformed provenance", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ctxgraph-invalid-manifest-"));
+  try {
+    const base = {
+      version: 1,
+      model: "fake",
+      repoDigest: "a".repeat(64),
+      files: [{ path: "src/a.ts", hash: "b".repeat(64) }],
+      nodes: [],
+    };
+    writeFileSync(join(dir, "manifest.json"), JSON.stringify(base));
+    assert.ok(readManifest(dir));
+
+    writeFileSync(join(dir, "manifest.json"), JSON.stringify({
+      ...base,
+      files: [{ path: "../outside.ts", hash: "b".repeat(64) }],
+    }));
+    assert.equal(readManifest(dir), undefined);
+
+    writeFileSync(join(dir, "manifest.json"), JSON.stringify({
+      ...base,
+      provenance: { version: 1, sourceDigest: "bad", extractorDigest: "x", rankingPolicy: "p" },
+    }));
+    assert.equal(readManifest(dir), undefined);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -533,3 +533,24 @@ test("readWorkspace: rejects foreign/invalid json as not-a-workspace", () => {
   assert.deepEqual(readWorkspace(p), { version: 1, children: ["a", "x"] });
   rmSync(p, { recursive: true, force: true });
 });
+
+test("workspace reader/writer reject traversal, absolute, nested, and duplicate children", () => {
+  const p = mkdtempSync(join(tmpdir(), "ws-invalid-"));
+  try {
+    mkdirSync(contextDirFor(p), { recursive: true });
+    for (const children of [["../outside"], ["a/b"], ["C:/outside"], ["a", "a"]]) {
+      writeFileSync(join(contextDirFor(p), "workspace.json"), JSON.stringify({ version: 1, children }));
+      assert.equal(readWorkspace(p), null, `must reject ${JSON.stringify(children)}`);
+    }
+    assert.throws(
+      () => writeWorkspace(p, { version: 1, children: ["../outside"] }),
+      /traversal|repo-relative/i,
+    );
+    assert.throws(
+      () => writeWorkspace(p, { version: 1, children: ["a", "a"] }),
+      /unique/i,
+    );
+  } finally {
+    rmSync(p, { recursive: true, force: true });
+  }
+});

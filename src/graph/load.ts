@@ -25,7 +25,7 @@
  */
 import { statSync } from "node:fs";
 import { readGraph, wiringPath } from "./write.js";
-import { readAskIndex, askIndexPath, type AskIndex } from "../ask/index-file.js";
+import { askIndexMatchesGraph, readAskIndex, askIndexPath, type AskIndex } from "../ask/index-file.js";
 import type { GraphV1 } from "./types.js";
 
 interface CacheEntry<T> {
@@ -92,11 +92,12 @@ export function loadGraphCached(outDir: string): GraphV1 | null {
 
 /** Cached `readAskIndex(outDir)` — same semantics, keyed on the sidecar file.
  * Returns a shared cached reference; callers must not mutate the returned index. */
-export function loadAskIndexCached(outDir: string): AskIndex | null {
+export function loadAskIndexCached(outDir: string, graph?: GraphV1 | null): AskIndex | null {
   const path = askIndexPath(outDir);
-  return loadCached(askIndexCache, path, () => readAskIndex(outDir), () => {
+  const index = loadCached(askIndexCache, path, () => readAskIndex(outDir), () => {
     __parseCount.askIndex++;
   });
+  return index && askIndexMatchesGraph(index, graph) ? index : null;
 }
 
 /**

@@ -126,6 +126,10 @@ export interface GraphV1 {
     /** Ranking scopes: posix path prefixes relative to the graph root, "" = root scope.
      * Absent (old graphs) ≡ [{ prefix: "", label: "" }]. Sorted by prefix length desc. */
     scopes?: ScopeV1[];
+    /** Optional on legacy graphs. Binds this graph to source/extractor/policy. */
+    provenance?: import("./provenance.js").BuildProvenanceV1;
+    /** Digest of the deterministic graph structure + provenance. */
+    buildDigest?: string;
   };
   nodes: NodeV1[];
   edges: EdgeV1[];

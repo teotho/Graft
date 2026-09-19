@@ -19,6 +19,8 @@ import matter from "gray-matter";
 import { contextDirFor } from "../context/node-file.js";
 import { withSavings, savingsFor, savingsTurnNudge, type Savings } from "../context/savings.js";
 import { loadGraphCached, loadAskIndexCached } from "../graph/load.js";
+import { DEFAULT_RANKING_POLICY, RANKING_POLICY_ID } from "./policy.js";
+import { resolveContainedPath } from "../util/paths.js";
 import {
   assertPrefixIndexed,
   pathUnderPrefix,
@@ -92,6 +94,12 @@ export interface AskRankingMetadata {
   baseline: Array<{ group: string; hit: AskHit }>;
   baselineCoverage?: number;
   baselineCoverageStrong?: number;
+  /** Stable policy identity and effective constants for audit/debug callers. */
+  policy?: {
+    id: string;
+    graphWeight: number;
+    graphRescueFloor: number;
+  };
 }
 
 /** Max source lines to inline per hit — a definition longer than this is
@@ -183,7 +191,8 @@ function loadCorpus(outDir: string): Corpus {
       });
     }
   }
-  return { concepts, graph: loadGraphCached(outDir), askIndex: loadAskIndexCached(outDir) };
+  const graph = loadGraphCached(outDir);
+  return { concepts, graph, askIndex: loadAskIndexCached(outDir, graph) };
 }
 
 /** Score a document's token counts against the query counts (name field
@@ -411,13 +420,13 @@ function structural(query: string, graph: GraphV1, limit: number, inPrefix?: str
  * lets connectivity reorder near-ties and separate a connected hit from an
  * isolated same-word collision, without letting structure override a clear
  * lexical winner. */
-const GRAPH_WEIGHT = 0.5;
+const GRAPH_WEIGHT = DEFAULT_RANKING_POLICY.graphWeight;
 
 /** A node the query never word-matched is pulled into the results only if the
  * walk gives it at least this share of the top node's mass — i.e. it is
  * genuinely central to the matched cluster, not incidentally reachable. This is
  * what surfaces the config/helper a task depends on but didn't name. */
-const RESCUE_FLOOR = 0.15;
+const RESCUE_FLOOR = DEFAULT_RANKING_POLICY.graphRescueFloor;
 
 /** Term presence with plural folding — "packs" finds "pack" and vice versa, so
  * a natural-language plural doesn't read as a miss against identifier tokens. */
@@ -1184,6 +1193,11 @@ function lexical(
         baselineCoverageStrong: baselineScored[0]
           ? matchedStrongOf.get(baselineScored[0]) ?? 0
           : undefined,
+        policy: {
+          id: RANKING_POLICY_ID,
+          graphWeight: GRAPH_WEIGHT,
+          graphRescueFloor: RESCUE_FLOOR,
+        },
       }
     : undefined;
   return {
@@ -1250,7 +1264,7 @@ function parseSpan(pointer: string): { path: string; from: number; to: number } 
  * capped at {@link MAX_SPAN_LINES}. Returns null if the file can't be read. */
 function sliceSpan(root: string, path: string, from: number, to: number): string | null {
   try {
-    const source = readSourceFile(join(root, path));
+    const source = readSourceFile(resolveContainedPath(root, path, "graph source path"));
     if (source === null) return null; // unsupported encoding (e.g. UTF-16BE)
     const lines = source.split("\n");
     const start = Math.max(1, from);

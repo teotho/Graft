@@ -19,10 +19,13 @@
  * contribution is folded into the stored `df` at query time (see `ask.ts`),
  * which is why `df` here counts symbol/file nodes only.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { GraphV1 } from "../graph/types.js";
 import { CACHE_DIR } from "../context/node-file.js";
+import { writeJsonAtomic } from "../util/state.js";
+import { digestGraphBuild, digestProvenance } from "../graph/provenance.js";
+import { readGraph, wiringPath } from "../graph/write.js";
 
 /** Words too common/short to carry query intent — dropped before scoring. */
 const STOP = new Set([
@@ -66,6 +69,11 @@ export interface AskIndex {
   df: [string, number][];
   docCount: number;
   docs: AskIndexDoc[];
+  /** Optional on legacy sidecars. New sidecars are bound to one graph build. */
+  binding?: {
+    graphDigest: string;
+    provenanceDigest: string;
+  };
 }
 
 export const ASK_INDEX_FILE = "ask-index.json";
@@ -96,6 +104,7 @@ function bagLen(p: [string, number][]): number {
  * byte-identical sidecar.
  */
 export function writeAskIndex(outDir: string, graph: GraphV1): string {
+  const meta = graph.meta;
   const nodes = [...graph.nodes].sort((a, b) => a.id.localeCompare(b.id));
   const docs: AskIndexDoc[] = [];
   const df = new Map<string, number>();
@@ -122,11 +131,16 @@ export function writeAskIndex(outDir: string, graph: GraphV1): string {
     df: pairs(df),
     docCount: nodes.length,
     docs,
+    ...(meta?.provenance
+      ? { binding: {
+          graphDigest: meta.buildDigest ?? digestGraphBuild(graph),
+          provenanceDigest: digestProvenance(meta.provenance),
+        } }
+      : {}),
   };
 
   const outPath = askIndexPath(outDir);
-  mkdirSync(dirname(outPath), { recursive: true });
-  writeFileSync(outPath, JSON.stringify(index) + "\n");
+  writeJsonAtomic(outPath, index, true);
   return outPath;
 }
 
@@ -135,7 +149,7 @@ export function writeAskIndex(outDir: string, graph: GraphV1): string {
  * the number of docs actually stored (a corrupted/truncated sidecar would
  * otherwise silently skew IDF) — any of which means the caller should fall
  * back to live tokenization, never crash or trust bad data. */
-export function readAskIndex(outDir: string): AskIndex | null {
+export function readAskIndex(outDir: string, graph?: GraphV1 | null): AskIndex | null {
   const path = askIndexPath(outDir);
   if (!existsSync(path)) return null;
   try {
@@ -152,8 +166,31 @@ export function readAskIndex(outDir: string): AskIndex | null {
     ) {
       return null;
     }
+    if (!raw.docs.every(validDoc) || !validPairs(raw.df)) return null;
+    const comparisonGraph = graph ?? (raw.binding ? readGraph(wiringPath(outDir)) : undefined);
+    if (!askIndexMatchesGraph(raw as AskIndex, comparisonGraph)) return null;
     return raw as AskIndex;
   } catch {
     return null;
   }
+}
+
+export function askIndexMatchesGraph(index: AskIndex, graph?: GraphV1 | null): boolean {
+  if (!index.binding) return true; // legacy sidecars remain backward-compatible
+  if (!graph?.meta.provenance) return false;
+  return index.binding.graphDigest === (graph.meta.buildDigest ?? digestGraphBuild(graph)) &&
+    index.binding.provenanceDigest === digestProvenance(graph.meta.provenance);
+}
+
+function validPairs(value: unknown): value is [string, number][] {
+  return Array.isArray(value) && value.every((pair) =>
+    Array.isArray(pair) && pair.length === 2 && typeof pair[0] === "string" &&
+    Number.isFinite(pair[1]) && pair[1] >= 0,
+  );
+}
+
+function validDoc(value: unknown): value is AskIndexDoc {
+  if (!value || typeof value !== "object") return false;
+  const doc = value as Partial<AskIndexDoc>;
+  return typeof doc.id === "string" && validPairs(doc.name) && validPairs(doc.path) && validPairs(doc.body);
 }

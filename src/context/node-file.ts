@@ -28,6 +28,9 @@ import { contentHash, normalizeName } from "../util/id.js";
 import { relPosix, stripTrailingSlashes } from "../util/paths.js";
 // Value-only import of a constant; `write.ts` pulls in nothing from here, so no cycle.
 import { GRAPH_DIR } from "../graph/write.js";
+import { writeJsonAtomic } from "../util/state.js";
+import { assertRepoRelativePath } from "../util/paths.js";
+import { isBuildProvenance, type BuildProvenanceV1 } from "../graph/provenance.js";
 
 /** A source file a node was derived from, with its content hash at generation time. */
 export interface SourceRef {
@@ -71,6 +74,7 @@ export interface Manifest {
   files: SourceRef[];
   /** Node roster (a subset of each node's frontmatter, for fast reads). */
   nodes: Array<{ slug: string; name: string; type: string; sources: string[]; sourcesDigest: string }>;
+  provenance?: BuildProvenanceV1;
 }
 
 export const MANIFEST_VERSION = 1;
@@ -364,15 +368,27 @@ export function deleteNode(dir: string, slug: string): void {
 }
 
 export function writeManifest(dir: string, manifest: Manifest): void {
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, MANIFEST_FILE), JSON.stringify(manifest, null, 2) + "\n");
+  writeJsonAtomic(join(dir, MANIFEST_FILE), manifest);
 }
 
 export function readManifest(dir: string): Manifest | undefined {
   const path = join(dir, MANIFEST_FILE);
   if (!existsSync(path)) return undefined;
   try {
-    return JSON.parse(readFileSync(path, "utf8")) as Manifest;
+    const raw = JSON.parse(readFileSync(path, "utf8")) as Partial<Manifest>;
+    if (raw.version !== MANIFEST_VERSION || typeof raw.model !== "string" ||
+        typeof raw.repoDigest !== "string" || !Array.isArray(raw.files) || !Array.isArray(raw.nodes)) return undefined;
+    if (raw.provenance !== undefined && !isBuildProvenance(raw.provenance)) return undefined;
+    for (const ref of raw.files) {
+      if (!ref || typeof ref.path !== "string" || typeof ref.hash !== "string") return undefined;
+      assertRepoRelativePath(ref.path, "manifest source path");
+    }
+    for (const node of raw.nodes) {
+      if (!node || typeof node.slug !== "string" || typeof node.name !== "string" ||
+          typeof node.type !== "string" || typeof node.sourcesDigest !== "string" || !Array.isArray(node.sources)) return undefined;
+      for (const source of node.sources) assertRepoRelativePath(String(source), "manifest node source path");
+    }
+    return raw as Manifest;
   } catch {
     return undefined;
   }

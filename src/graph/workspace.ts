@@ -21,7 +21,7 @@
  * CLI print/exit wrappers and the per-child build orchestration live in
  * `workspace-cli.ts`; `mcp/tools.ts` calls the federate* functions directly.
  */
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { contextDirFor } from "../context/node-file.js";
 import { checkGraph } from "./check.js";
@@ -51,6 +51,8 @@ import { fuseScopes, STRONG_FLOOR, HIGH_FLOOR, type ScopedDoc } from "../ask/fus
 import { grepGraph, type GrepGroup, type GrepResult } from "../search/grep.js";
 import { formatGrepResult, zeroHitNote } from "../search/grep-cli.js";
 import { withSavings, type Savings } from "../context/savings.js";
+import { assertImmediateChildName, normalizePathPrefix, resolveContainedPath } from "../util/paths.js";
+import { writeJsonAtomic } from "../util/state.js";
 
 /** The parent index written to `<parent>/graft/workspace.json`. Nodes/edges
  * never live at the parent — they live in each child's own `graft/`. */
@@ -74,7 +76,9 @@ export function readWorkspace(root: string, override?: string): WorkspaceV1 | nu
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<WorkspaceV1>;
     if (parsed.version !== 1 || !Array.isArray(parsed.children)) return null;
-    return { version: 1, children: parsed.children.map(String) };
+    const children = parsed.children.map((child) => assertImmediateChildName(String(child)));
+    if (new Set(children).size !== children.length) return null;
+    return { version: 1, children };
   } catch {
     return null;
   }
@@ -83,10 +87,14 @@ export function readWorkspace(root: string, override?: string): WorkspaceV1 | nu
 /** Write the workspace index, sorting children for a stable, minimal git diff. */
 export function writeWorkspace(root: string, ws: WorkspaceV1, override?: string): string {
   const dir = contextDirFor(root, override);
-  mkdirSync(dir, { recursive: true });
   const path = join(dir, WORKSPACE_FILE);
-  const sorted: WorkspaceV1 = { version: 1, children: [...ws.children].sort() };
-  writeFileSync(path, JSON.stringify(sorted, null, 2) + "\n");
+  const children = ws.children.map((child) => assertImmediateChildName(child));
+  if (new Set(children).size !== children.length) throw new Error("workspace children must be unique");
+  const sorted: WorkspaceV1 = {
+    version: 1,
+    children: children.sort(),
+  };
+  writeJsonAtomic(path, sorted);
   return path;
 }
 
@@ -148,7 +156,14 @@ export function loadWorkspaceGraphs(root: string, override?: string): WorkspaceG
   const loaded: LoadedChild[] = [];
   const missing: string[] = [];
   for (const child of children) {
-    const graph = loadGraphCached(contextDirFor(join(root, child)));
+    let childRoot: string;
+    try {
+      childRoot = resolveContainedPath(root, child, "workspace child");
+    } catch {
+      missing.push(child);
+      continue;
+    }
+    const graph = loadGraphCached(contextDirFor(childRoot));
     if (graph) loaded.push({ child, graph });
     else missing.push(child);
   }
@@ -252,7 +267,7 @@ export function federateAsk(
   let onlyChild: string | undefined;
   let childIn: string | undefined;
   if (opts.in) {
-    const prefix = opts.in.replace(/\/+$/, "");
+    const prefix = normalizePathPrefix(opts.in);
     const [name, ...rest] = prefix.split("/");
     const allChildren = [...wg.loaded.map((l) => l.child), ...wg.missing].sort();
     if (!allChildren.includes(name)) {

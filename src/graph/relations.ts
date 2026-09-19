@@ -10,11 +10,6 @@
  * surface agrees on what counts as a dependency edge.
  */
 import type { Relation } from "./types.js";
+import { WALKABLE_RELATIONS } from "./ontology.js";
 
-export const WALK_RELATIONS: ReadonlySet<Relation> = new Set<Relation>([
-  "calls",
-  "references",
-  "imports",
-  "implements",
-  "extends",
-]);
+export const WALK_RELATIONS: ReadonlySet<Relation> = WALKABLE_RELATIONS;

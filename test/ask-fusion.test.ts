@@ -16,6 +16,7 @@ import {
   type ScopeRankOps,
 } from "../src/ask/fuse.js";
 import { formatAsk, type AskHit, type AskResult } from "../src/ask/ask.js";
+import { DEFAULT_RANKING_POLICY, RANKING_POLICY_ID } from "../src/ask/policy.js";
 
 /** A scope's docs with per-scope-normalized-looking scores, best first. */
 function scopeDocs(scope: string, scores: number[]): ScopedDoc[] {
@@ -27,6 +28,9 @@ test("fusion constants match the spec", () => {
   assert.equal(PARTICIPATION_RATIO, 0.25);
   assert.equal(STRONG_FLOOR, 0.1);
   assert.equal(HIGH_FLOOR, 0.5);
+  assert.equal(RRF_K, DEFAULT_RANKING_POLICY.workspaceRrfK);
+  assert.equal(PARTICIPATION_RATIO, DEFAULT_RANKING_POLICY.scopeParticipationRatio);
+  assert.equal(RANKING_POLICY_ID, "graft-ranking-v1");
 });
 
 test("10-doc scope vs 2-doc scope: top-6 of the fused order contains both scopes' best", () => {

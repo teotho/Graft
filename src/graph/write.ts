@@ -11,6 +11,9 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { EdgeV1, GraphV1, NodeV1 } from "./types.js";
+import { assertRepoRelativePath } from "../util/paths.js";
+import { isBuildProvenance } from "./provenance.js";
+import { RELATIONS } from "./ontology.js";
 
 /** Hidden subdir under the context dir that holds machine-only graph artifacts. */
 export const GRAPH_DIR = ".graph";
@@ -27,15 +30,73 @@ export function wiringPath(outDir: string): string {
  */
 export function readGraph(path: string): GraphV1 | null {
   try {
-    return JSON.parse(readFileSync(path, "utf8")) as GraphV1;
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    const raw = parsed?.meta ? parsed : parsed?.version === 1
+      ? {
+          meta: {
+            version: 1,
+            nodeCount: Array.isArray(parsed.nodes) ? parsed.nodes.length : -1,
+            edgeCount: Array.isArray(parsed.edges) ? parsed.edges.length : -1,
+            languages: [],
+          },
+          nodes: parsed.nodes,
+          edges: parsed.edges,
+        }
+      : parsed;
+    return isGraphV1(raw) ? raw : null;
   } catch {
     return null;
   }
 }
 
+function isGraphV1(value: unknown): value is GraphV1 {
+  if (!value || typeof value !== "object") return false;
+  const graph = value as Partial<GraphV1>;
+  const meta = graph.meta as GraphV1["meta"] | undefined;
+  if (!meta || meta.version !== 1 || !Number.isInteger(meta.nodeCount) || !Number.isInteger(meta.edgeCount) ||
+      !Array.isArray(meta.languages) || !meta.languages.every((v) => typeof v === "string") ||
+      !Array.isArray(graph.nodes) || !Array.isArray(graph.edges) ||
+      meta.nodeCount !== graph.nodes.length || meta.edgeCount !== graph.edges.length) return false;
+  if (meta.provenance !== undefined && !isBuildProvenance(meta.provenance)) return false;
+  if (meta.buildDigest !== undefined && !/^[a-f0-9]{64}$/.test(meta.buildDigest)) return false;
+  if (meta.scopes !== undefined && (!Array.isArray(meta.scopes) || !meta.scopes.every((scope) => {
+    try {
+      if (!scope || typeof scope.prefix !== "string" || typeof scope.label !== "string" || !Array.isArray(scope.markers)) return false;
+      if (scope.prefix) assertRepoRelativePath(scope.prefix, "graph scope prefix");
+      return scope.markers.every((marker) => typeof marker === "string");
+    } catch { return false; }
+  }))) return false;
+
+  const ids = new Set<string>();
+  for (const node of graph.nodes) {
+    if (!node || typeof node.id !== "string" || typeof node.name !== "string" || typeof node.path !== "string" ||
+        typeof node.kind !== "string" || typeof node.span !== "string" || typeof node.exported !== "boolean" ||
+        typeof node.origin !== "string" || typeof node.body_hash !== "string" ||
+        typeof node.summary_state !== "string" || ids.has(node.id)) return false;
+    try { assertRepoRelativePath(node.path, "graph node path"); } catch { return false; }
+    ids.add(node.id);
+  }
+  for (const edge of graph.edges) {
+    if (!edge || typeof edge.source !== "string" || typeof edge.target !== "string" ||
+        typeof edge.relation !== "string" || !RELATIONS.has(edge.relation as EdgeV1["relation"]) ||
+        typeof edge.confidence !== "string" || !ids.has(edge.source)) return false;
+  }
+  return true;
+}
+
 export function writeGraph(graph: GraphV1, outDir: string): string {
+  const compatible = graph.meta ? graph : {
+    meta: {
+      version: 1 as const,
+      nodeCount: graph.nodes.length,
+      edgeCount: graph.edges.length,
+      languages: [],
+    },
+    nodes: graph.nodes,
+    edges: graph.edges,
+  };
   const sorted: GraphV1 = {
-    ...graph,
+    ...compatible,
     nodes: [...graph.nodes].sort((a, b) => a.id.localeCompare(b.id)).map(stripBodyText),
     edges: [...graph.edges].sort(edgeOrder),
   };

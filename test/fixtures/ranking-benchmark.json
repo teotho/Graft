@@ -1,0 +1,17 @@
+[
+  {
+    "query": "ranking policy graph rescue",
+    "expected": ["src/ask/policy.ts"],
+    "topK": 8
+  },
+  {
+    "query": "workspace child containment",
+    "expected": ["src/graph/workspace.ts"],
+    "topK": 8
+  },
+  {
+    "query": "ask index graph provenance binding",
+    "expected": ["src/ask/index-file.ts"],
+    "topK": 8
+  }
+]

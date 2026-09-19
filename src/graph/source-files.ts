@@ -10,6 +10,7 @@ import { statSync } from "node:fs";
 import { resolve } from "node:path";
 import { walkDir } from "../ingest/fs.js";
 import { relPosix } from "../util/paths.js";
+import { assertRepoRelativePath } from "../util/paths.js";
 import { readFollowNestedRepos, readFollowSubmodules, readIncludeDirs } from "../util/state.js";
 import { languageOf, depthExtensions } from "./extract.js";
 import { genericLangOf, genericExtensions } from "./generic.js";
@@ -57,7 +58,10 @@ export function filterByOnlyDirs(
   if (!onlyDirs || onlyDirs.size === 0) return files;
   return files.filter((abs) => {
     const rel = relPosix(root, abs);
-    return [...onlyDirs].some((d) => rel === d || rel.startsWith(`${d}/`));
+    return [...onlyDirs].some((d) => {
+      const prefix = assertRepoRelativePath(d, "only-dir");
+      return rel === prefix || rel.startsWith(`${prefix}/`);
+    });
   });
 }
 

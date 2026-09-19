@@ -13,12 +13,36 @@ import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { buildGraph } from "../src/graph/build.js";
 import { ask, formatAsk, skeleton, formatSkeleton, isTestPath } from "../src/ask/ask.js";
+import { DEFAULT_RANKING_POLICY, RANKING_POLICY_ID } from "../src/ask/policy.js";
 
 test("isTestPath: de-ranks test files, not real source", () => {
   for (const p of ["server/download_test.go", "packages/x/tests/foo.test.tsx", "a/__tests__/b.ts", "src/api.spec.ts", "pkg/foo/bar_test.go"])
     assert.ok(isTestPath(p), `${p} should be a test path`);
   for (const p of ["server/download.go", "packages/element/src/selection.ts", "src/api.ts", "cmd/root.go"])
     assert.ok(!isTestPath(p), `${p} should NOT be a test path`);
+});
+
+test("optional ranking metadata explains the versioned policy without changing defaults", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "graft-ask-policy-"));
+  try {
+    writeFileSync(join(dir, "policy.ts"), "export function policyTarget() { return 1; }\n");
+    await buildGraph(dir);
+    const ordinary = ask(dir, "policy target", { limit: 5 });
+    const explained = ask(dir, "policy target", {
+      limit: 5,
+      fileComplement: true,
+      fileTopLock: true,
+      includeRankingMetadata: true,
+    });
+    assert.deepEqual(explained.hits, ordinary.hits);
+    assert.deepEqual(explained.ranking?.policy, {
+      id: RANKING_POLICY_ID,
+      graphWeight: DEFAULT_RANKING_POLICY.graphWeight,
+      graphRescueFloor: DEFAULT_RANKING_POLICY.graphRescueFloor,
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("isTestPath: recognizes pytest's test_*.py prefix and conftest, even outside a tests/ dir", () => {

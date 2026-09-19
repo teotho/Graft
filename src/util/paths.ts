@@ -23,7 +23,8 @@
  * on posix, which is what guarantees an existing Mac/Linux graph is byte-identical
  * across this change.
  */
-import { relative, sep } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
+import { realpathSync } from "node:fs";
 
 /** Platform separators → `/`. Identity on posix. */
 export function toPosixPath(p: string): string {
@@ -68,5 +69,63 @@ export function normalizePathPrefix(p: string): string {
   while (out.startsWith("./")) out = out.slice(2);
   // Trailing separators only; a bare "/" normalizes to "" (match everything),
   // which is exactly how `pathUnderPrefix` reads an empty prefix.
-  return stripTrailingSlashes(out);
+  out = stripTrailingSlashes(out);
+  if (out === "" || out === ".") return "";
+  assertRepoRelativePath(out, "path prefix");
+  return out;
+}
+
+/**
+ * Validate a path stored in, or supplied relative to, a repository.
+ *
+ * Graft's on-disk formats use posix, repo-relative paths. Accepting an
+ * absolute path or a `..` segment turns every later `resolve(root, path)` into
+ * a filesystem escape, including paths read from untrusted/corrupt artifacts.
+ */
+export function assertRepoRelativePath(path: string, label = "path"): string {
+  if (typeof path !== "string" || path.includes("\0")) {
+    throw new Error(`${label} must be a valid repo-relative path`);
+  }
+  const normalized = toPosixPath(path);
+  if (isAbsolute(path) || normalized.startsWith("/") || /^[A-Za-z]:\//.test(normalized)) {
+    throw new Error(`${label} must be repo-relative: ${JSON.stringify(path)}`);
+  }
+  const parts = normalized.split("/");
+  if (parts.some((part) => part === ".." || part === "")) {
+    throw new Error(`${label} must not contain traversal or empty segments: ${JSON.stringify(path)}`);
+  }
+  return normalized;
+}
+
+/** An immediate child name, never a path. Used by workspace.json readers. */
+export function assertImmediateChildName(name: string, label = "workspace child"): string {
+  const normalized = assertRepoRelativePath(name, label);
+  if (normalized === "." || normalized.includes("/")) {
+    throw new Error(`${label} must be an immediate child name: ${JSON.stringify(name)}`);
+  }
+  return normalized;
+}
+
+/** True when `candidate` is at or below `root`, using canonical paths. */
+export function isCanonicallyContained(root: string, candidate: string): boolean {
+  let canonicalRoot: string;
+  let canonicalCandidate: string;
+  try {
+    canonicalRoot = realpathSync(resolve(root));
+    canonicalCandidate = realpathSync(resolve(candidate));
+  } catch {
+    return false;
+  }
+  const rel = relative(canonicalRoot, canonicalCandidate);
+  return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));
+}
+
+/** Resolve a validated repo-relative path and reject canonical symlink escapes. */
+export function resolveContainedPath(root: string, repoRelative: string, label = "path"): string {
+  const normalized = assertRepoRelativePath(repoRelative, label);
+  const abs = resolve(root, ...normalized.split("/"));
+  if (!isCanonicallyContained(root, abs)) {
+    throw new Error(`${label} escapes the repository: ${JSON.stringify(repoRelative)}`);
+  }
+  return abs;
 }

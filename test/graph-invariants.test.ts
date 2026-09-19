@@ -18,6 +18,13 @@ import { readGraph, wiringPath } from "../src/graph/write.js";
 import { contextDirFor } from "../src/context/node-file.js";
 import { checkGraphInvariants } from "../src/graph/invariants.js";
 import type { GraphV1 } from "../src/graph/types.js";
+import {
+  EXTERNAL_TARGET_RELATIONS,
+  GRAPH_ONTOLOGY_VERSION,
+  RELATIONS,
+  RELATION_ONTOLOGY,
+  WALKABLE_RELATIONS,
+} from "../src/graph/ontology.js";
 
 // A recursion-free fixture spanning both tiers: main→helper (TS, depth),
 // load→parse (Rust, breadth), Circle implements Shape (PHP, depth → an
@@ -117,6 +124,15 @@ test("Tier-0: the invariant checker actually catches malformed graphs (not vacuo
     edges: [{ source: "a.ts#Foo", target: "Override", relation: "references", confidence: "inferred" }],
   });
   assert.deepEqual(okAnno.problems, [], "an external annotation string target is allowed, not dangling");
+});
+
+test("relation ontology is closed, versioned, and preserves traversal semantics", () => {
+  assert.equal(GRAPH_ONTOLOGY_VERSION, 1);
+  assert.deepEqual([...RELATIONS].sort(), ["calls", "contains", "extends", "implements", "imports", "references"]);
+  assert.deepEqual([...WALKABLE_RELATIONS].sort(), ["calls", "extends", "implements", "imports", "references"]);
+  assert.deepEqual([...EXTERNAL_TARGET_RELATIONS].sort(), ["extends", "implements", "imports", "references"]);
+  assert.equal(RELATION_ONTOLOGY.contains.walkable, false);
+  assert.equal(RELATION_ONTOLOGY.calls.externalTargetAllowed, false);
 });
 
 test("Tier-0: the build is deterministic — two cold builds produce the identical graph", async () => {

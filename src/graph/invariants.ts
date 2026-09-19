@@ -22,13 +22,11 @@
  * standalone copy on purpose, so the CLI report still works when `dist/` is stale.
  */
 import type { GraphV1 } from "./types.js";
+import { EXTERNAL_TARGET_RELATIONS, RELATIONS } from "./ontology.js";
 
 const KINDS = new Set<string>([
   "file", "class", "function", "method", "interface",
   "type", "enum", "struct", "module", "constant", "variable",
-]);
-const RELATIONS = new Set<string>([
-  "contains", "calls", "imports", "references", "implements", "extends",
 ]);
 const CONFIDENCE = new Set<string>([
   "lsp_resolved", "lsp_dispatch", "extracted", "inferred",
@@ -39,7 +37,7 @@ const CONFIDENCE = new Set<string>([
 // annotation whose type is not declared in-repo. The set is language-agnostic —
 // no other producer currently leaves an unresolved `references` target, so a
 // future bug elsewhere would be masked here.
-const TARGET_MAY_BE_EXTERNAL = new Set<string>(["imports", "extends", "implements", "references"]);
+const TARGET_MAY_BE_EXTERNAL: ReadonlySet<string> = EXTERNAL_TARGET_RELATIONS;
 
 export interface InvariantResult {
   /** One human-readable line per violation; empty when the graph is well-formed. */
